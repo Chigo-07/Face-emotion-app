@@ -26,7 +26,7 @@ tqdm
 # Video processing
 moviepy==2.2.1
 ffmpeg==1.4
-Pillow==12.0.0
+
 
 # TensorFlow / Keras dependencies
 astunparse>=1.6.0

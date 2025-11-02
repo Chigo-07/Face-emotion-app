@@ -1,10 +1,13 @@
 from flask import Flask, render_template, request
 from keras.models import load_model
 from keras.preprocessing import image
+from dotenv import load_dotenv
+load_dotenv()
 import numpy as np
 import cv2
 import sqlite3
 import os
+import requests
 from werkzeug.utils import secure_filename
 
 # Initialize Flask app
@@ -15,14 +18,32 @@ UPLOAD_FOLDER = 'static/uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Load trained model
-model = load_model('face_emotionModel.h5')
+# ==============================
+# Load trained model from external storage
+# ==============================
+MODEL_URL = os.environ.get('MODEL_URL') # Set in Render environment variables
+MODEL_DIR = "models"
+os.makedirs(MODEL_DIR, exist_ok=True)
+MODEL_PATH = os.path.join(MODEL_DIR, "face_emotionModel.h5")
+ # Render free-tier temp folder
 
-# Emotion labels (adjust if your model has different order)
+# Download model if it doesn't exist locally
+if not os.path.exists(MODEL_PATH):
+    print("Downloading model from external storage...")
+    r = requests.get(MODEL_URL)
+    with open(MODEL_PATH, "wb") as f:
+        f.write(r.content)
+    print("Model downloaded!")
+
+# Load the model
+model = load_model(MODEL_PATH)
+
+# Emotion labels
 emotion_labels = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
 
-
+# ==============================
 # Database setup
+# ==============================
 def init_db():
     conn = sqlite3.connect('database.db')
     c = conn.cursor()
@@ -41,26 +62,19 @@ def init_db():
 
 init_db()
 
+# ==============================
 # Function to predict emotion
+# ==============================
 def predict_emotion(img_path, debug=False):
-    # Load the uploaded image
     img = cv2.imread(img_path)
     if img is None:
         raise ValueError(f"Could not read image at {img_path}")
 
-    # Convert to grayscale since model expects 1 channel
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # Resize to 48x48 (model input size)
     gray = cv2.resize(gray, (48, 48))
-
-    # Normalize (same as training)
     gray = gray.astype('float32') / 255.0
-
-    # Reshape to (1, 48, 48, 1)
     gray = np.expand_dims(gray, axis=(0, -1))
 
-    # Predict
     preds = model.predict(gray)
     probs = preds[0]
     emotion_index = np.argmax(probs)
@@ -72,13 +86,13 @@ def predict_emotion(img_path, debug=False):
 
     return emotion
 
-
-# Route for the homepage
+# ==============================
+# Routes
+# ==============================
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# Route to handle form submission
 @app.route('/submit', methods=['POST'])
 def submit():
     name = request.form['name']
@@ -97,8 +111,10 @@ def submit():
         # Save to database
         conn = sqlite3.connect('database.db')
         c = conn.cursor()
-        c.execute('INSERT INTO students (name, email, department, image_path, emotion) VALUES (?, ?, ?, ?, ?)',
-                  (name, email, department, file_path, emotion))
+        c.execute(
+            'INSERT INTO students (name, email, department, image_path, emotion) VALUES (?, ?, ?, ?, ?)',
+            (name, email, department, file_path, emotion)
+        )
         conn.commit()
         conn.close()
 
@@ -119,6 +135,9 @@ def submit():
 
     return "No image uploaded. Please try again."
 
-if __name__ == '__main__':
-    app.run(debug=True)
+# ==============================
+# Run app
+# ==============================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
 
